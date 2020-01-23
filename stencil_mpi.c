@@ -113,13 +113,13 @@ void free_types() {
 /************* Indexe global / local computation ******/
 
 void local2global(int xl, int yl, int *xg, int *yg) {
-  *xg = coords[0]*STENCIL_SIZE_X + xl;
-  *yg = coords[1]*STENCIL_SIZE_Y + yl;
+  *xg = coords[0]*(STENCIL_SIZE_X - 1) + xl;
+  *yg = coords[1]*(STENCIL_SIZE_Y - 1) + yl;
 }
 
 void global2local(int *xl, int *yl, int xg, int yg) {
-  *xl = (xg % STENCIL_SIZE_X);
-  *yl = (yg % STENCIL_SIZE_Y);
+  *xl = (xg % (STENCIL_SIZE_X - 1));
+  *yl = (yg % (STENCIL_SIZE_Y - 1));
 }
 
 
@@ -139,12 +139,12 @@ static void stencil_init(void)
     for(x = 0; x < STENCIL_SIZE_X; x++) {
       local2global(x, 0, &xg, &yg);
       if (coords[1] == 0) values[b][x][0] = xg;
-      if (coords[1] == max_dim_2 - 1) values[b][x][STENCIL_SIZE_Y - 1] = STENCIL_SIZE_X - xg;
+      if (coords[1] == max_dim_2 - 1) values[b][x][STENCIL_SIZE_Y - 1] = (STENCIL_SIZE_X-1)*max_dim_1 - xg;
     }
     for(y = 0; y < STENCIL_SIZE_Y; y++) {
       local2global(0, y, &xg, &yg);
       if (coords[0] == 0) values[b][0][y] = yg;
-      if (coords[0] == max_dim_1 - 1) values[b][STENCIL_SIZE_X - 1][y] = STENCIL_SIZE_Y - yg;
+      if (coords[0] == max_dim_1 - 1) values[b][STENCIL_SIZE_X - 1][y] = (STENCIL_SIZE_Y-1)*max_dim_2 - yg;
     }
   }
 }
@@ -157,7 +157,7 @@ static void stencil_display(int b, int x0, int x1, int y0, int y1)
   {
     for(x = x0; x <= x1; x++)
     {
-      printf("%8.5g ", values[b][x][y]);
+      printf("%4.5g ", values[b][x][y]);
     }
     printf("\n");
   }
@@ -272,6 +272,7 @@ int main(int argc, char**argv)
     /* TODO : Corriger le calcul de new_stencil_* */
     
     //for (STENCIL_SIZE_Y = 10; STENCIL_SIZE_Y < MAX_STENCIL_SIZE_Y; STENCIL_SIZE_Y *= 1.25) {
+  printf("%d, %d\n", coords[0], coords[1]);
   stencil_init();
   stencil_display(0, 0, STENCIL_SIZE_X-1, 0, STENCIL_SIZE_Y-1);
       //stencil_display(current_buffer, 0, STENCIL_SIZE_X - 1, 0, STENCIL_SIZE_Y - 1);
