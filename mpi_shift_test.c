@@ -37,25 +37,49 @@ int init_ranks() {
   MPI_Sendrecv(neighbors + DOWN, 1, MPI_INT, neighbors[LEFT], DOWNLEFT, neighbors + DOWNRIGHT, 1, MPI_INT, neighbors[RIGHT], DOWNLEFT, grid, MPI_STATUS_IGNORE);
 }
 
+void my_send_recv_directions(void* tosend, void* torecv, MPI_Datatype type, enum Directions dir) {
+  MPI_Sendrecv(tosend, 1, type, neighbors[dir], 0, torecv, 1, type, neighbors[opposite[dir]], 0, grid, MPI_STATUS_IGNORE);
+  //printf("[%d] : in : %d -> out : %d\n", cart_rank, *(int*)tosend, *(int*)torecv);
+}
+
 int sqrt_int(int n) {
   int d;
   for(d = 2; d*d < n; ++d);
   return (d*d == n) ? d : -1;
 }
 
-int print_map() {
-  int coords[2];
+int print_map(int *buff) {
+  int _coords[2];
   for (int i = 0; i < dims[1]; ++i)
   {
-    coords[1] = i; 
+    _coords[1] = i; 
     for (int j = 0; j < dims[0]; ++j)
     {
-      coords[0] = j;
+      _coords[0] = j;
       int rnk;
-      MPI_Cart_rank(grid, coords, &rnk);
-      printf("%2d ", rnk);
+      MPI_Cart_rank(grid, _coords, &rnk);
+      if (buff == NULL && cart_rank == 0) {
+        printf("%2d ", rnk);
+      }
+      else if (buff != NULL) {
+        if (cart_rank == 0) {
+          int toprint;
+          if (rnk == 0) {
+            toprint = *buff;
+          } else {
+            MPI_Recv(&toprint, 1, MPI_INT, rnk, 1, grid, MPI_STATUS_IGNORE);
+            //printf("%d\n", rnk);
+          }
+          printf("%3d ", toprint);
+        }
+        else if (cart_rank == rnk) {
+          MPI_Send(buff, 1, MPI_INT, 0, 1, grid);
+        }
+      }
     }
-    printf("\n");
+    if (cart_rank == 0) {
+      printf("\n");
+    }
   }
 }
 
@@ -78,9 +102,7 @@ int main(int argc, char **argv) {
 
   MPI_Cart_coords(grid, cart_rank, ndims, coords);
 
-  if(cart_rank == 0) {
-    print_map();
-  }
+  print_map(NULL);
   
   init_ranks();
 
@@ -94,6 +116,15 @@ int main(int argc, char **argv) {
     }
     MPI_Barrier(grid);
   }
+
+  /* Communicate value through a dimension */
+  int val = cart_rank, out = MPI_PROC_NULL;
+  my_send_recv_directions(&val, &out, MPI_INT, UPRIGHT);
+
+  print_map(&val);
+  if(cart_rank == 0) {puts("");}
+  print_map(&out);
+
 
   MPI_Comm_free(&grid);
 

@@ -6,8 +6,8 @@
 #include <getopt.h>
 #include <mpi.h>
 
-static int STENCIL_SIZE_X;
-static int STENCIL_SIZE_Y;
+#define STENCIL_SIZE_X 10
+#define STENCIL_SIZE_Y 10
 
 /** number of buffers for N-buffering; should be at least 2 */
 #define STENCIL_NBUFFERS 2
@@ -21,7 +21,7 @@ static const double epsilon = 0.0001;
 /** max number of steps */
 static const int stencil_max_steps = 10000;
 
-static double **values[STENCIL_NBUFFERS];
+static double values[STENCIL_NBUFFERS][STENCIL_SIZE_X][STENCIL_SIZE_Y];
 
 /** latest computed buffer */
 static int current_buffer = 0;
@@ -29,35 +29,107 @@ static int current_buffer = 0;
 /** Grid communicator */
 static MPI_Comm grid;
 
-/** Grid informations */
-static int dimensions[2];
-static const int periodic[] = {0, 0};
-static const int reordering = 0;
-static int coords[2];
-static int grid_rank;
-static int max_dim_1;
-static int max_dim_2;
-static int new_stencil_x;
-static int new_stencil_y;
+/** Grid information */
+static int       dimensions[2];
+static int const periodic[] = {0, 0};
+static int const reordering = 0;
+static int       coords[2];
+static int       grid_rank;
+static int       max_dim_1;
+static int       max_dim_2;
+static int       new_stencil_x;
+static int       new_stencil_y;
 
-static void init_value(int x, int y, double *vx, double *vy) {
+/*************** Directions definitions *****************/
 
-  *vx = (x == 0)*x*(coords[0] == 0) /* x only on the first row n the process grid */
-    + (x == new_stencil_x - 1)*(STENCIL_SIZE_X - x);
+/* Enum for all directions */
+enum Directions{
+  UPLEFT, UP, UPRIGHT, LEFT, CENTER, RIGHT, DOWNLEFT, DOWN, DOWNRIGHT, LAST_DIRECTION
+};
+enum Directions opposite  [] = {DOWNRIGHT, DOWN, DOWNLEFT, RIGHT, CENTER, LEFT, UPRIGHT, UP, UPLEFT, LAST_DIRECTION};
+
+/* Rank shift info */
+int neighbors[LAST_DIRECTION];
+int default_rank = MPI_PROC_NULL;
+int procdim;
+
+/** Assigns the good rank to all neighbors */
+void init_ranks() {
+  /* Convenient way to say there is no one arround me */
+  for(int d = 0; d < LAST_DIRECTION; ++d) {
+    neighbors[d] = MPI_PROC_NULL;
+  }
+  neighbors[CENTER] = grid_rank;
+  /* Get direct neighbors */
+  MPI_Cart_shift(grid, 0,  1, neighbors + LEFT, neighbors + RIGHT);
+  MPI_Cart_shift(grid, 1,  1, neighbors + UP  , neighbors + DOWN);
+  /* Set left sided directions */
+  MPI_Sendrecv(neighbors + UP  , 1, MPI_INT, neighbors[RIGHT], UPRIGHT  , neighbors + UPLEFT  , 1, MPI_INT, neighbors[LEFT], UPRIGHT  , grid, MPI_STATUS_IGNORE);
+  MPI_Sendrecv(neighbors + DOWN, 1, MPI_INT, neighbors[RIGHT], DOWNRIGHT, neighbors + DOWNLEFT, 1, MPI_INT, neighbors[LEFT], DOWNRIGHT, grid, MPI_STATUS_IGNORE);
+  /* Set right sided directions */
+  MPI_Sendrecv(neighbors + UP  , 1, MPI_INT, neighbors[LEFT], UPLEFT  , neighbors + UPRIGHT  , 1, MPI_INT, neighbors[RIGHT], UPLEFT  , grid, MPI_STATUS_IGNORE);
+  MPI_Sendrecv(neighbors + DOWN, 1, MPI_INT, neighbors[LEFT], DOWNLEFT, neighbors + DOWNRIGHT, 1, MPI_INT, neighbors[RIGHT], DOWNLEFT, grid, MPI_STATUS_IGNORE);
 }
+
+
+/********************* Types ****************************/
+
+/** Declarations */
+MPI_Datatype row, col;
+MPI_Datatype comm_types[LAST_DIRECTION];
+
+/** Allocate types and set array of type to ease communications */
+void create_types() {
+  /** Contiguous columns and vector row */
+  MPI_Type_contiguous(STENCIL_SIZE_Y, MPI_DOUBLE, &row);
+  MPI_Type_vector(1, STENCIL_SIZE_X, STENCIL_SIZE_Y, MPI_DOUBLE, &col);
+
+  MPI_Type_commit(&row);
+  MPI_Type_commit(&col);
+
+  /* Corners */
+  comm_types[DOWNLEFT]  =
+  comm_types[DOWNRIGHT] =
+  comm_types[UPRIGHT]   =
+  comm_types[UPLEFT]    = MPI_INT;
+  /* Verticals */
+  comm_types[UP] = comm_types[DOWN] = row;
+  /* Horizontal */
+  comm_types[RIGHT] = comm_types[LEFT] = col;
+}
+
+/** Send data to dest and receive from source  */
+void my_send_recv_directions(void* tosend, void* torecv, enum Directions dir) {
+  MPI_Datatype type = comm_types[dir];
+  MPI_Sendrecv(tosend, 1, type, neighbors[dir], 0, torecv, 1, type, neighbors[opposite[dir]], 0, grid, MPI_STATUS_IGNORE);
+}
+
+/** Free types */
+void free_types() {
+    MPI_Type_free(&row);
+    MPI_Type_free(&col);
+}
+
+/************* Indexe global / local computation ******/
+
+void local2global(int xl, int yl, int *xg, int *yg) {
+  *xg = coords[0]*STENCIL_SIZE_X + xl;
+  *yg = coords[1]*STENCIL_SIZE_Y + yl;
+}
+
+void global2local(int *xl, int *yl, int xg, int yg) {
+  *xl = (xg % STENCIL_SIZE_X);
+  *yl = (yg % STENCIL_SIZE_Y);
+}
+
+
+/************* Stencil operations *********************/
 
 /** init stencil values to 0, borders to non-zero */
 static void stencil_init(void)
 {
   /* malloc all values */
-  for (int buff = 0; buff < STENCIL_NBUFFERS; ++ buff) {
-    values[buff] = malloc(sizeof(double*) * new_stencil_x);
-    for (int x = 0; x < new_stencil_x; ++ x) {
-      values[buff][x] = malloc(sizeof(double) * new_stencil_y);
-    }
-  }
-
-  int b, x, y;
+  int b, x, y, xg, yg;
   for(b = 0; b < STENCIL_NBUFFERS; b++) {
     for(x = 0; x < new_stencil_x; x++) {
       for(y = 0; y < new_stencil_y; y++) {
@@ -65,12 +137,14 @@ static void stencil_init(void)
       }
     }
     for(x = 0; x < STENCIL_SIZE_X; x++) {
-      values[b][x][0] = x;
-      values[b][x][STENCIL_SIZE_Y - 1] = STENCIL_SIZE_X - x;
+      local2global(x, 0, &xg, &yg);
+      if (coords[1] == 0) values[b][x][0] = xg;
+      if (coords[1] == max_dim_2 - 1) values[b][x][STENCIL_SIZE_Y - 1] = STENCIL_SIZE_X - xg;
     }
     for(y = 0; y < STENCIL_SIZE_Y; y++) {
-      values[b][0][y] = y;
-      values[b][STENCIL_SIZE_X - 1][y] = STENCIL_SIZE_Y - y;
+      local2global(0, y, &xg, &yg);
+      if (coords[0] == 0) values[b][0][y] = yg;
+      if (coords[0] == max_dim_1 - 1) values[b][STENCIL_SIZE_X - 1][y] = STENCIL_SIZE_Y - yg;
     }
   }
 }
@@ -86,16 +160,6 @@ static void stencil_display(int b, int x0, int x1, int y0, int y1)
       printf("%8.5g ", values[b][x][y]);
     }
     printf("\n");
-  }
-}
-
-static void stencil_free() {
-  for (int buff = 0; buff < STENCIL_NBUFFERS; buff++) {
-    for (int x = 0; x < new_stencil_x; x++)
-    {
-      free(values[buff][x]);
-    }
-    free(values[buff]);
   }
 }
 
@@ -175,21 +239,22 @@ int main(int argc, char**argv)
       MAX_STENCIL_SIZE = atoi(optarg);
       break;
     default: /* '?' */
-      fprintf(stderr, "Usage: %s [-t nsecs] [-n] name\n",
+      fprintf(stderr, "Usage: %s [-s size]\n",
               argv[0]);
       exit(EXIT_FAILURE);
     }
   }
 
   if(MAX_STENCIL_SIZE < 0) {
-    fprintf(stderr, "No sie specified\n");
-    exit(EXIT_FAILURE);
+    fprintf(stderr, "No size specified\n");
+    exit(EXIT_SUCCESS);
   }
 
   int wsize, wrank;
   MPI_Comm_size(MPI_COMM_WORLD, &wsize);
   MPI_Comm_rank(MPI_COMM_WORLD, &wrank);
 
+  /** Create the grid */
   int fdim  = best_divisor(wsize);
   max_dim_1 = dimensions[0] = fdim;
   max_dim_2 = dimensions[1] = wsize / fdim;
@@ -198,17 +263,19 @@ int main(int argc, char**argv)
   MPI_Comm_rank(grid, &grid_rank);
   MPI_Cart_coords(grid, grid_rank, 2, coords);
 
-  printf("size,time,nstep\n");
-  for (int size = 10; size < MAX_STENCIL_SIZE; size *= 1.25) {
-    STENCIL_SIZE_Y = STENCIL_SIZE_X = size;
+  init_ranks();
+
+  create_types();
+
+  int size = MAX_STENCIL_SIZE;
+  //for (int size = 10; size < MAX_STENCIL_SIZE; size *= 1.25) {
     /* TODO : Corriger le calcul de new_stencil_* */
-    new_stencil_x = (STENCIL_SIZE_X / max_dim_1) + (STENCIL_SIZE_X % max_dim_1);
-    new_stencil_y = (STENCIL_SIZE_Y / max_dim_2) + (STENCIL_SIZE_Y % max_dim_2);
-
+    
     //for (STENCIL_SIZE_Y = 10; STENCIL_SIZE_Y < MAX_STENCIL_SIZE_Y; STENCIL_SIZE_Y *= 1.25) {
-      stencil_init();
+  stencil_init();
+  stencil_display(0, 0, STENCIL_SIZE_X-1, 0, STENCIL_SIZE_Y-1);
       //stencil_display(current_buffer, 0, STENCIL_SIZE_X - 1, 0, STENCIL_SIZE_Y - 1);
-
+#if 0
       struct timespec t1, t2;
       clock_gettime(CLOCK_MONOTONIC, &t1);
       int s;
@@ -231,8 +298,12 @@ int main(int argc, char**argv)
       //stencil_display(current_buffer, 0, STENCIL_SIZE_X - 1, 0, STENCIL_SIZE_Y - 1);
       stencil_free();
     //}
-  }
+  //}
+#endif//0
   MPI_Comm_free(&grid);
+
+  free_types();
+
   MPI_Finalize();
   return 0;
 }
