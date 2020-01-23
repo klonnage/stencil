@@ -81,8 +81,8 @@ MPI_Datatype comm_types[LAST_DIRECTION];
 /** Allocate types and set array of type to ease communications */
 void create_types() {
   /** Contiguous columns and vector row */
-  MPI_Type_contiguous(STENCIL_SIZE_Y, MPI_DOUBLE, &row);
-  MPI_Type_vector(1, STENCIL_SIZE_X, STENCIL_SIZE_Y, MPI_DOUBLE, &col);
+  MPI_Type_contiguous(STENCIL_SIZE_X-2, MPI_DOUBLE, &row);
+  MPI_Type_vector(1, STENCIL_SIZE_X-2, STENCIL_SIZE_Y, MPI_DOUBLE, &col);
 
   MPI_Type_commit(&row);
   MPI_Type_commit(&col);
@@ -101,7 +101,7 @@ void create_types() {
 /** Send data to dest and receive from source  */
 void my_send_recv_directions(void* tosend, void* torecv, enum Directions dir) {
   MPI_Datatype type = comm_types[dir];
-  MPI_Sendrecv(tosend, 1, type, neighbors[dir], 0, torecv, 1, type, neighbors[opposite[dir]], 0, grid, MPI_STATUS_IGNORE);
+  MPI_Sendrecv(tosend, 1, type, neighbors[dir], 0, torecv, 1, type, neighbors[opposite[dir]], dir, grid, MPI_STATUS_IGNORE);
 }
 
 /** Free types */
@@ -122,6 +122,32 @@ void global2local(int *xl, int *yl, int xg, int yg) {
   *yl = (yg % (STENCIL_SIZE_Y - 1));
 }
 
+static int index_send[LAST_DIRECTION][2];
+static int index_recv[LAST_DIRECTION][2];
+
+static void init_indexes_comm() {
+  /* Send */
+  index_send[UPLEFT][0] = index_send[LEFT][0] = index_send[UP][0] = 1;
+  index_send[UPLEFT][1] = index_send[LEFT][1] = index_send[UP][1] = 1;
+
+  index_send[UPRIGHT][0] = index_send[RIGHT][0] = STENCIL_SIZE_X - 2;
+  index_send[UPRIGHT][1] = index_send[RIGHT][1] = 1;
+
+  index_send[DOWNLEFT][0] = index_send[DOWN][0] = 1;
+  index_send[DOWNLEFT][1] = index_send[DOWN][1] = STENCIL_SIZE_Y - 2;
+
+  index_send[DOWNRIGHT][0] = STENCIL_SIZE_X - 2;
+  index_send[DOWNRIGHT][1] = STENCIL_SIZE_Y - 2;
+
+  /* Recv */
+  index_recv[UPLEFT][0] = index_recv[LEFT][0] = index_recv[DOWNLEFT][0] = STENCIL_SIZE_X - 1;
+  index_recv[UPRIGHT][0] = index_recv[RIGHT][0] = index_recv[DOWNRIGHT][0] = 0;
+  index_recv[UP][0] = index_recv[DOWN][0] = 1;
+
+  index_recv[UPLEFT][1] = index_recv[UP][1] = index_recv[UPRIGHT][1] = STENCIL_SIZE_Y - 1;
+  index_recv[DOWNLEFT][1] = index_recv[DOWN][1] = index_recv[DOWNRIGHT][1] = 0;
+  index_recv[RIGHT][1] = index_recv[LEFT][1] = 1;
+}
 
 /************* Stencil operations *********************/
 
@@ -182,6 +208,32 @@ static void stencil_step(void)
   current_buffer = next_buffer;
 }
 
+
+/* Send and receive data to all neighbors */
+void stencil_update() {
+  int d = UP;
+  my_send_recv_directions(&values[current_buffer][index_send[d][0]][index_send[d][1]],
+                          &values[current_buffer][index_recv[d][0]][index_recv[d][1]], d);
+  for (int i = 0; i < STENCIL_SIZE_X - 2; i++)
+  {
+    printf("%4.2g ",values[current_buffer][index_send[d][0] + i][index_send[d][1]]);
+  }
+  puts("");
+  
+  for (int i = 0; i < STENCIL_SIZE_X - 2; i++)
+  {
+    printf("%4.2g ",values[current_buffer][index_recv[d][0] + i][index_recv[d][1]]);
+  }
+  puts("");
+
+  /*for (int i = 0; i < LAST_DIRECTION; ++i) {
+    if (i != CENTER) {
+      my_send_recv_directions(&values[current_buffer][index_send[i][0]][index_send[i][1]],
+                              &values[current_buffer][index_recv[i][0]][index_recv[i][1]], i);
+    }
+  }*/
+}
+
 /** return 1 if computation has converged */
 static int stencil_test_convergence(void)
 {
@@ -231,24 +283,6 @@ static int best_divisor(int x) {
 int main(int argc, char**argv)
 {
   MPI_Init(&argc, &argv);
-  int MAX_STENCIL_SIZE = -1;
-  char opt;
-  while ((opt = getopt(argc, argv, "s:")) != -1) {
-    switch (opt) {
-    case 's':
-      MAX_STENCIL_SIZE = atoi(optarg);
-      break;
-    default: /* '?' */
-      fprintf(stderr, "Usage: %s [-s size]\n",
-              argv[0]);
-      exit(EXIT_FAILURE);
-    }
-  }
-
-  if(MAX_STENCIL_SIZE < 0) {
-    fprintf(stderr, "No size specified\n");
-    exit(EXIT_SUCCESS);
-  }
 
   int wsize, wrank;
   MPI_Comm_size(MPI_COMM_WORLD, &wsize);
@@ -264,17 +298,20 @@ int main(int argc, char**argv)
   MPI_Cart_coords(grid, grid_rank, 2, coords);
 
   init_ranks();
+  init_indexes_comm();
 
   create_types();
 
-  int size = MAX_STENCIL_SIZE;
+  int size = STENCIL_SIZE_X;
   //for (int size = 10; size < MAX_STENCIL_SIZE; size *= 1.25) {
     /* TODO : Corriger le calcul de new_stencil_* */
     
     //for (STENCIL_SIZE_Y = 10; STENCIL_SIZE_Y < MAX_STENCIL_SIZE_Y; STENCIL_SIZE_Y *= 1.25) {
   printf("%d, %d\n", coords[0], coords[1]);
   stencil_init();
-  stencil_display(0, 0, STENCIL_SIZE_X-1, 0, STENCIL_SIZE_Y-1);
+  stencil_step();
+  stencil_update();
+  stencil_display(1, 0, STENCIL_SIZE_X-1, 0, STENCIL_SIZE_Y-1);
       //stencil_display(current_buffer, 0, STENCIL_SIZE_X - 1, 0, STENCIL_SIZE_Y - 1);
 #if 0
       struct timespec t1, t2;
