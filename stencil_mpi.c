@@ -81,8 +81,9 @@ MPI_Datatype comm_types[LAST_DIRECTION];
 /** Allocate types and set array of type to ease communications */
 void create_types() {
   /** Contiguous columns and vector row */
-  MPI_Type_contiguous(STENCIL_SIZE_X-2, MPI_DOUBLE, &row);
-  MPI_Type_vector(1, STENCIL_SIZE_X-2, STENCIL_SIZE_Y, MPI_DOUBLE, &col);
+  MPI_Type_contiguous(STENCIL_SIZE_Y-2, MPI_DOUBLE, &col);
+  MPI_Type_vector(STENCIL_SIZE_X-2, 1, STENCIL_SIZE_Y, MPI_DOUBLE, &row);
+  //MPI_Type_vector(1, STENCIL_SIZE_X-2, STENCIL_SIZE_Y, MPI_DOUBLE, &col);
 
   MPI_Type_commit(&row);
   MPI_Type_commit(&col);
@@ -91,7 +92,7 @@ void create_types() {
   comm_types[DOWNLEFT]  =
   comm_types[DOWNRIGHT] =
   comm_types[UPRIGHT]   =
-  comm_types[UPLEFT]    = MPI_INT;
+  comm_types[UPLEFT]    = MPI_DOUBLE;
   /* Verticals */
   comm_types[UP] = comm_types[DOWN] = row;
   /* Horizontal */
@@ -100,8 +101,25 @@ void create_types() {
 
 /** Send data to dest and receive from source  */
 void my_send_recv_directions(void* tosend, void* torecv, enum Directions dir) {
-  MPI_Datatype type = comm_types[dir];
-  MPI_Sendrecv(tosend, 1, type, neighbors[dir], 0, torecv, 1, type, neighbors[opposite[dir]], dir, grid, MPI_STATUS_IGNORE);
+  MPI_Datatype type = comm_types[dir] ;
+  if(dir != UP && dir != DOWN) MPI_Sendrecv(tosend, 1, type, neighbors[dir], dir, torecv, 1, type, neighbors[opposite[dir]], dir, grid, MPI_STATUS_IGNORE);
+  else {
+    double sbuff[STENCIL_SIZE_X - 2], rbuff[STENCIL_SIZE_X - 2];
+    double *rtosend = (double*)tosend;
+    double *rtorecv = (double*)torecv;
+
+    for (int i = 0; i < STENCIL_SIZE_X - 2; ++i) {
+      rbuff[i] = *(rtorecv + i*STENCIL_SIZE_Y);
+      sbuff[i] = *(rtosend + i*STENCIL_SIZE_Y);
+    }
+    
+
+    MPI_Sendrecv(sbuff, STENCIL_SIZE_X-2, MPI_DOUBLE, neighbors[dir], dir, rbuff, STENCIL_SIZE_X-2, MPI_DOUBLE, neighbors[opposite[dir]], dir, grid, MPI_STATUS_IGNORE);
+
+    for (int i = 0; i < STENCIL_SIZE_X-2; ++i) {
+      *(rtorecv + i*STENCIL_SIZE_Y) = rbuff[i];
+    }
+  }
 }
 
 /** Free types */
@@ -211,8 +229,13 @@ static void stencil_step(void)
 
 /* Send and receive data to all neighbors */
 void stencil_update() {
-  int d = UP;
-  my_send_recv_directions(&values[current_buffer][index_send[d][0]][index_send[d][1]],
+  // values[current_buffer][index_send[d][0] + 2][index_send[d][1]] = 3.;
+
+  /*MPI_Datatype type = comm_types[d];
+  MPI_Sendrecv(&values[current_buffer][index_send[d][0]][index_send[d][1]], 1, row, neighbors[d], d,
+               buff, STENCIL_SIZE_X-2, MPI_DOUBLE, neighbors[opposite[d]], d, grid, MPI_STATUS_IGNORE);*/
+  
+  /*my_send_recv_directions(&values[current_buffer][index_send[d][0]][index_send[d][1]],
                           &values[current_buffer][index_recv[d][0]][index_recv[d][1]], d);
   for (int i = 0; i < STENCIL_SIZE_X - 2; i++)
   {
@@ -222,16 +245,16 @@ void stencil_update() {
   
   for (int i = 0; i < STENCIL_SIZE_X - 2; i++)
   {
-    printf("%4.2g ",values[current_buffer][index_recv[d][0] + i][index_recv[d][1]]);
+    printf("%4.2g ", buff[i]);//values[current_buffer][index_recv[d][0] + i][index_recv[d][1]]);
   }
-  puts("");
+  puts("\n");*/
 
-  /*for (int i = 0; i < LAST_DIRECTION; ++i) {
+  for (int i = 0; i < LAST_DIRECTION; ++i) {
     if (i != CENTER) {
       my_send_recv_directions(&values[current_buffer][index_send[i][0]][index_send[i][1]],
                               &values[current_buffer][index_recv[i][0]][index_recv[i][1]], i);
     }
-  }*/
+  }
 }
 
 /** return 1 if computation has converged */
@@ -307,12 +330,17 @@ int main(int argc, char**argv)
     /* TODO : Corriger le calcul de new_stencil_* */
     
     //for (STENCIL_SIZE_Y = 10; STENCIL_SIZE_Y < MAX_STENCIL_SIZE_Y; STENCIL_SIZE_Y *= 1.25) {
-  printf("%d, %d\n", coords[0], coords[1]);
+  printf("[%d] : %d, %d\n", grid_rank, coords[0], coords[1]);
   stencil_init();
-  stencil_step();
-  stencil_update();
-  stencil_display(1, 0, STENCIL_SIZE_X-1, 0, STENCIL_SIZE_Y-1);
-      //stencil_display(current_buffer, 0, STENCIL_SIZE_X - 1, 0, STENCIL_SIZE_Y - 1);
+
+  for (int step = 0; step < 4; ++step)
+  {
+    stencil_step();
+    stencil_update();
+    printf("\nstep %d : \n", step + 1);
+    stencil_display((step + 1)%2, 0, STENCIL_SIZE_X-1, 0, STENCIL_SIZE_Y-1);
+  }
+  
 #if 0
       struct timespec t1, t2;
       clock_gettime(CLOCK_MONOTONIC, &t1);

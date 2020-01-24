@@ -28,7 +28,7 @@ int init_ranks() {
   neighbors[CENTER] = cart_rank;
   /* Get direct neighbors */
   MPI_Cart_shift(grid, 0,  1, neighbors + LEFT, neighbors + RIGHT);
-  MPI_Cart_shift(grid, 1,  1, neighbors + UP  , neighbors + DOWN);
+  MPI_Cart_shift(grid, 1,  0, neighbors + UP  , neighbors + DOWN);
   /* Set left sided directions */
   MPI_Sendrecv(neighbors + UP  , 1, MPI_INT, neighbors[RIGHT], UPRIGHT  , neighbors + UPLEFT  , 1, MPI_INT, neighbors[LEFT], UPRIGHT  , grid, MPI_STATUS_IGNORE);
   MPI_Sendrecv(neighbors + DOWN, 1, MPI_INT, neighbors[RIGHT], DOWNRIGHT, neighbors + DOWNLEFT, 1, MPI_INT, neighbors[LEFT], DOWNRIGHT, grid, MPI_STATUS_IGNORE);
