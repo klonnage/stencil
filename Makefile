@@ -8,6 +8,10 @@ all: stencil
 stencil_mpi:stencil_mpi.c
 	${MPICC} ${CFLAGS} $< -o $@ ${LDLIBS}
 
+
+stencil_mpi_omp:stencil_mpi.c
+	${MPICC} -DOMP ${CFLAGS} $< -o $@ ${LDLIBS}
+
 clean:
 	-rm stencil
 

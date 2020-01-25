@@ -63,10 +63,10 @@ void init_ranks() {
   /* Get direct neighbors */
   MPI_Cart_shift(grid, 0,  1, neighbors + LEFT, neighbors + RIGHT);
   MPI_Cart_shift(grid, 1,  1, neighbors + UP  , neighbors + DOWN);
-  /* Set left sided directions */
+  /* Set corner-left-sided directions */
   MPI_Sendrecv(neighbors + UP  , 1, MPI_INT, neighbors[RIGHT], UPRIGHT  , neighbors + UPLEFT  , 1, MPI_INT, neighbors[LEFT], UPRIGHT  , grid, MPI_STATUS_IGNORE);
   MPI_Sendrecv(neighbors + DOWN, 1, MPI_INT, neighbors[RIGHT], DOWNRIGHT, neighbors + DOWNLEFT, 1, MPI_INT, neighbors[LEFT], DOWNRIGHT, grid, MPI_STATUS_IGNORE);
-  /* Set right sided directions */
+  /* Set corner-right-sided directions */
   MPI_Sendrecv(neighbors + UP  , 1, MPI_INT, neighbors[LEFT], UPLEFT  , neighbors + UPRIGHT  , 1, MPI_INT, neighbors[RIGHT], UPLEFT  , grid, MPI_STATUS_IGNORE);
   MPI_Sendrecv(neighbors + DOWN, 1, MPI_INT, neighbors[LEFT], DOWNLEFT, neighbors + DOWNRIGHT, 1, MPI_INT, neighbors[RIGHT], DOWNLEFT, grid, MPI_STATUS_IGNORE);
 }
@@ -83,8 +83,7 @@ void create_types() {
   /** Contiguous columns and vector row */
   MPI_Type_contiguous(STENCIL_SIZE_Y-2, MPI_DOUBLE, &col);
   MPI_Type_vector(STENCIL_SIZE_X-2, 1, STENCIL_SIZE_Y, MPI_DOUBLE, &row);
-  //MPI_Type_vector(1, STENCIL_SIZE_X-2, STENCIL_SIZE_Y, MPI_DOUBLE, &col);
-
+  
   MPI_Type_commit(&row);
   MPI_Type_commit(&col);
 
@@ -104,6 +103,10 @@ void my_send_recv_directions(void* tosend, void* torecv, enum Directions dir) {
   MPI_Datatype type = comm_types[dir] ;
   if(dir != UP && dir != DOWN) MPI_Sendrecv(tosend, 1, type, neighbors[dir], dir, torecv, 1, type, neighbors[opposite[dir]], dir, grid, MPI_STATUS_IGNORE);
   else {
+    /* Here we copy data to send in a buffer to send 'STENCIL_SIZE_X - 2' double
+     * instead of a row as we have a probleme with the vector type for communications.
+     * It's like the Pack / Unpack. */
+
     double sbuff[STENCIL_SIZE_X - 2], rbuff[STENCIL_SIZE_X - 2];
     double *rtosend = (double*)tosend;
     double *rtorecv = (double*)torecv;
@@ -113,7 +116,6 @@ void my_send_recv_directions(void* tosend, void* torecv, enum Directions dir) {
       sbuff[i] = *(rtosend + i*STENCIL_SIZE_Y);
     }
     
-
     MPI_Sendrecv(sbuff, STENCIL_SIZE_X-2, MPI_DOUBLE, neighbors[dir], dir, rbuff, STENCIL_SIZE_X-2, MPI_DOUBLE, neighbors[opposite[dir]], dir, grid, MPI_STATUS_IGNORE);
 
     for (int i = 0; i < STENCIL_SIZE_X-2; ++i) {
@@ -143,6 +145,7 @@ void global2local(int *xl, int *yl, int xg, int yg) {
 static int index_send[LAST_DIRECTION][2];
 static int index_recv[LAST_DIRECTION][2];
 
+/** Set the shift needed to access data easily data for send/receive communications */
 static void init_indexes_comm() {
   /* Send */
   index_send[UPLEFT][0] = index_send[LEFT][0] = index_send[UP][0] = 1;
@@ -169,10 +172,10 @@ static void init_indexes_comm() {
 
 /************* Stencil operations *********************/
 
-/** init stencil values to 0, borders to non-zero */
+/** Initializes stencil values to 0, borders to non-zero */
 static void stencil_init(void)
 {
-  /* malloc all values */
+  /* Initializes all values */
   int b, x, y, xg, yg;
   for(b = 0; b < STENCIL_NBUFFERS; b++) {
     for(x = 0; x < new_stencil_x; x++) {
@@ -213,6 +216,9 @@ static void stencil_step(void)
   int prev_buffer = current_buffer;
   int next_buffer = (current_buffer + 1) % STENCIL_NBUFFERS;
   int x, y;
+#if defined(OMP)
+#pragma omp parallel for collapse(2)
+#endif
   for(x = 1; x < STENCIL_SIZE_X - 1; x++) {
     for(y = 1; y < STENCIL_SIZE_Y - 1; y++) {
       values[next_buffer][x][y] =
@@ -251,6 +257,7 @@ static int stencil_test_convergence_local(void)
   return 1;
 }
 
+/** All reduce to know if at least one did not converged (1 if everyone converged 0 otherwise) */
 static int stencil_test_convergence(void) {
   int local_converged, global_converged;
 

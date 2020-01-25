@@ -136,7 +136,7 @@ static int stencil_test_convergence_omp(void)
 {
   int prev_buffer = (current_buffer - 1 + STENCIL_NBUFFERS) % STENCIL_NBUFFERS;
   int x, y, has_converged = 1;
-  #pragma omp parallel for shared(prev_buffer, has_converged)
+  #pragma omp parallel for firstprivate(prev_buffer, has_converged)
   for(x = 1; x < STENCIL_SIZE_X - 1; x++) {
     for(y = 1; y < STENCIL_SIZE_Y - 1 && has_converged; y++) {
       if(fabs(values[prev_buffer][x][y] - values[current_buffer][x][y]) > epsilon) {
