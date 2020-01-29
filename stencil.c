@@ -4,6 +4,7 @@
 #include <math.h>
 #include <time.h>
 #include <getopt.h>
+#include <omp.h>
 
 static int STENCIL_SIZE_X;
 static int STENCIL_SIZE_Y;
@@ -202,7 +203,11 @@ int main(int argc, char**argv)
     exit(EXIT_FAILURE);
   }
 
+#ifdef OPENMP
+  printf("size,time,nstep,nthreads\n");
+#else
   printf("size,time,nstep\n");
+#endif
   for (int size = 60; size < MAX_STENCIL_SIZE; size *= 1.25) {
     STENCIL_SIZE_Y = STENCIL_SIZE_X = size;
     //for (STENCIL_SIZE_Y = 10; STENCIL_SIZE_Y < MAX_STENCIL_SIZE_Y; STENCIL_SIZE_Y *= 1.25) {
@@ -233,7 +238,15 @@ int main(int argc, char**argv)
       }
       clock_gettime(CLOCK_MONOTONIC, &t2);
       const double t_usec = (t2.tv_sec - t1.tv_sec) * 1000000.0 + (t2.tv_nsec - t1.tv_nsec) / 1000.0;
+#ifndef OPENMP
       printf("%d,%g,%d\n", size, t_usec, s);
+#else
+#pragma omp parallel
+{
+      #pragma omp master
+      printf("%d,%g,%d,%d\n", size, t_usec, s, omp_get_num_threads());
+}
+#endif
       //stencil_display(current_buffer, 0, STENCIL_SIZE_X - 1, 0, STENCIL_SIZE_Y - 1);
       stencil_free();
     //}

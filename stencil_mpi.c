@@ -6,8 +6,13 @@
 #include <getopt.h>
 #include <mpi.h>
 
+#ifndef STENCIL_SIZE_X
 #define STENCIL_SIZE_X 5
-#define STENCIL_SIZE_Y 5
+#endif//STENCIL_SIZE_X
+
+#ifndef STENCIL_SIZE_Y
+#define STENCIL_SIZE_Y 5 
+#endif//STENCIL_SIZE_Y
 
 /** number of buffers for N-buffering; should be at least 2 */
 #define STENCIL_NBUFFERS 2
@@ -196,6 +201,7 @@ static void stencil_init(void)
   }
 }
 
+#if 0
 /** display a (part of) the stencil values */
 static void stencil_display(int b, int x0, int x1, int y0, int y1)
 {
@@ -209,6 +215,7 @@ static void stencil_display(int b, int x0, int x1, int y0, int y1)
     printf("\n");
   }
 }
+#endif
 
 /** compute the next stencil step */
 static void stencil_step(void)
@@ -266,26 +273,6 @@ static int stencil_test_convergence(void) {
   return global_converged;
 }
 
-static int stencil_all_in_one(void) {
-  int prev_buffer = current_buffer;
-  int next_buffer = (current_buffer + 1) % STENCIL_NBUFFERS;
-  int x, y;
-  int has_converged = 1;
-  for(x = 1; x < STENCIL_SIZE_X - 1; x++) {
-    for(y = 1; y < STENCIL_SIZE_Y - 1; y++) {
-      values[next_buffer][x][y] =
-      alpha * values[prev_buffer][x - 1][y] +
-      alpha * values[prev_buffer][x + 1][y] +
-      alpha * values[prev_buffer][x][y - 1] +
-      alpha * values[prev_buffer][x][y + 1] +
-      (1.0 - 4.0 * alpha) * values[prev_buffer][x][y];
-      has_converged = has_converged && (fabs(values[next_buffer][x][y] - values[current_buffer][x][y]) > 1);
-    }
-  }
-  current_buffer = next_buffer;
-  return has_converged;
-}
-
 /** Return a divisor, the closest inferior to sqrt(x) */
 static int best_divisor(int x) {
   int d = 2, max_d = 1;
@@ -337,7 +324,7 @@ int main(int argc, char**argv)
   double avg_t_usec;
 
   MPI_Reduce(&t_usec, &avg_t_usec, 1, MPI_DOUBLE, MPI_MAX, 0, grid);
-  if (grid_rank == 0) {printf("Temps de calcul maximal entre les processus %g (usec)\n", t_usec);}
+  if (grid_rank == 0) {printf("%g,%d\n", t_usec, wsize);}
   
   MPI_Comm_free(&grid);
 
