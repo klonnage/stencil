@@ -54,6 +54,7 @@ static void stencil_init(void)
   }
 }
 
+#if 0
 /** display a (part of) the stencil values */
 static void stencil_display(int b, int x0, int x1, int y0, int y1)
 {
@@ -67,6 +68,7 @@ static void stencil_display(int b, int x0, int x1, int y0, int y1)
     printf("\n");
   }
 }
+#endif
 
 static void stencil_free() {
   for (int buff = 0; buff < STENCIL_NBUFFERS; buff++) {
@@ -78,6 +80,7 @@ static void stencil_free() {
   }
 }
 
+#if !defined(OPENMP) && ! defined(ALL_IN_ONE)
 /** compute the next stencil step */
 static void stencil_step(void)
 {
@@ -97,6 +100,7 @@ static void stencil_step(void)
   current_buffer = next_buffer;
 }
 
+#elif ! defined(ALL_IN_ONE)
 /* OpenMP function */
 static void stencil_step_omp(void)
 {
@@ -116,7 +120,9 @@ static void stencil_step_omp(void)
   }
   current_buffer = next_buffer;
 }
+#endif
 
+#if ! defined(OPENMP) && !defined(ALL_IN_ONE)
 /** return 1 if computation has converged */
 static int stencil_test_convergence(void)
 {
@@ -131,6 +137,7 @@ static int stencil_test_convergence(void)
   return 1;
 }
 
+#elif defined(OPENMP)
 /* OpenMP verison */
 static int stencil_test_convergence_omp(void)
 {
@@ -149,6 +156,9 @@ static int stencil_test_convergence_omp(void)
   }
   return has_converged;
 }
+#endif
+
+#if defined(ALL_IN_ONE)
 
 static int stencil_all_in_one(void) {
   int prev_buffer = current_buffer;
@@ -169,6 +179,7 @@ static int stencil_all_in_one(void) {
   current_buffer = next_buffer;
   return has_converged;
 }
+#endif
 
 int main(int argc, char**argv)
 {
@@ -192,7 +203,7 @@ int main(int argc, char**argv)
   }
 
   printf("size,time,nstep\n");
-  for (int size = 10; size < MAX_STENCIL_SIZE; size *= 1.25) {
+  for (int size = 60; size < MAX_STENCIL_SIZE; size *= 1.25) {
     STENCIL_SIZE_Y = STENCIL_SIZE_X = size;
     //for (STENCIL_SIZE_Y = 10; STENCIL_SIZE_Y < MAX_STENCIL_SIZE_Y; STENCIL_SIZE_Y *= 1.25) {
       stencil_init();
