@@ -103,7 +103,7 @@ static void stencil_step_omp(void)
   int prev_buffer = current_buffer;
   int next_buffer = (current_buffer + 1) % STENCIL_NBUFFERS;
   int x, y;
-  #pragma omp parallel for shared(prev_buffer, next_buffer) collapse(2)
+  #pragma omp parallel for shared(values[next_buffer]) firsprivate(prev_buffer, next_buffer, values[prev_buffer]) collapse(2)
   for(x = 1; x < STENCIL_SIZE_X - 1; x++) {
     for(y = 1; y < STENCIL_SIZE_Y - 1; y++) {
       values[next_buffer][x][y] =
@@ -136,13 +136,16 @@ static int stencil_test_convergence_omp(void)
 {
   int prev_buffer = (current_buffer - 1 + STENCIL_NBUFFERS) % STENCIL_NBUFFERS;
   int x, y, has_converged = 1;
-  #pragma omp parallel for firstprivate(prev_buffer, has_converged)
+  #pragma omp parallel
+  {
+  #pragma omp for collapse(2) firstprivate(prev_buffer, values) private(x, y) reduction(&& : has_converged)
   for(x = 1; x < STENCIL_SIZE_X - 1; x++) {
-    for(y = 1; y < STENCIL_SIZE_Y - 1 && has_converged; y++) {
+    for(y = 1; y < STENCIL_SIZE_Y - 1; y++) {
       if(fabs(values[prev_buffer][x][y] - values[current_buffer][x][y]) > epsilon) {
         has_converged = 0;
       }
     }
+  }
   }
   return has_converged;
 }
@@ -160,7 +163,7 @@ static int stencil_all_in_one(void) {
       alpha * values[prev_buffer][x][y - 1] +
       alpha * values[prev_buffer][x][y + 1] +
       (1.0 - 4.0 * alpha) * values[prev_buffer][x][y];
-      has_converged = has_converged && (fabs(values[next_buffer][x][y] - values[current_buffer][x][y]) > 1);
+      has_converged = has_converged && (fabs(values[next_buffer][x][y] - values[current_buffer][x][y]) > epsilon);
     }
   }
   current_buffer = next_buffer;
