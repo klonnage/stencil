@@ -1,8 +1,14 @@
 #!/bin/bash
 
-#module load compiler/gcc/9.1.0 compiler/intel/2019_update4 mpi/openmpi/3.1.4
+module load compiler/gcc/9.1.0 compiler/intel/2019_update4 mpi/openmpi/3.1.4
 
-size=500
+if [ $# -ne 1 ]
+then
+    echo "Preciser une taille svp"
+    exit 0
+fi
+
+size=$1
 echo "size,time,nproc" > scala-strong-$size.csv
 for np in `seq 1 1 6`
 do

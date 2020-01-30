@@ -48,5 +48,8 @@ La sortie est au format *csv*.
 
 ### Version MPI
 
-Pour les tests de scalabilité forte et faible deux scripts permettent de lancer les tests sur plafrim
-
+Pour les tests de scalabilité forte et faible deux scripts permettent de lancer les tests sur plafrim.
+Ils vont chargés des modules si non déjà chargés.
+Ils prennent une taille en argument.
+Pour la scalabilité forte il s'agit de *N*, soit un côté de la matrice globale. (strong_scaling.sh)
+Pour la scalabilité faible il s'agit de *n*, soit un côté de la matrice locale. (weak_scaling.sh)
