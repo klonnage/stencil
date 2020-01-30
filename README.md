@@ -53,3 +53,5 @@ Ils vont chargés des modules si non déjà chargés.
 Ils prennent une taille en argument.
 Pour la scalabilité forte il s'agit de *N*, soit un côté de la matrice globale. (strong_scaling.sh)
 Pour la scalabilité faible il s'agit de *n*, soit un côté de la matrice locale. (weak_scaling.sh)
+
+Les programmes génères des fchiers scala-weak-**size**.csv (scala-strong-**size**.csv), où **size** est la valeur de l'agument passé au programme, au format *csv*.
